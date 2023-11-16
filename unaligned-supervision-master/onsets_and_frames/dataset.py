@@ -11,17 +11,22 @@ from datetime import datetime
 from onsets_and_frames.midi_utils import *
 from onsets_and_frames.utils import *
 import time
-
+import json
 
 class EMDATASET(Dataset):
     def __init__(self,
                  audio_path='NoteEM_audio',
                  labels_path='NoteEm_labels',
+                 tsv_path='NoteEM_tsv',
                  groups=None, sequence_length=None, seed=42, device=DEFAULT_DEVICE,
                  instrument_map=None, update_instruments=False, transcriber=None,
                  conversion_map=None):
+        self.valid_ids = None
+        # with open(audio_path + "/../valid_list.json") as fin:
+        #     self.valid_ids = json.load(fin)
         self.audio_path = audio_path
         self.labels_path = labels_path
+        self.tsv_path = tsv_path
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
@@ -47,14 +52,16 @@ class EMDATASET(Dataset):
                 self.data.append(input_files)
         random.shuffle(self.data)
 
+
     def __len__(self):
         return len(self.data)
 
     def files(self, groups):
-        self.path = 'NoteEM_audio'
-        tsvs_path = 'NoteEM_tsv'
+        self.path = self.audio_path
+        tsvs_path = self.tsv_path
         res = []
-        good_ids = list(range(2075, 2084))
+        good_ids = list(range(1788, 1794))
+        # good_ids += list(range(2075, 2084))
         # good_ids += list(range(1817, 1820))
         # good_ids += list(range(2202, 2205))
         # good_ids += list(range(2415, 2418))
@@ -62,15 +69,30 @@ class EMDATASET(Dataset):
         for group in groups:
             tsvs = os.listdir(tsvs_path + '/' + group)
             tsvs = sorted(tsvs)
-            for shft in range(-5, 6):
+            for shft in range(0, 1):
                 curr_fls_pth = self.path + '/' + group + '#{}'.format(shft)
                 fls = os.listdir(curr_fls_pth)
                 fls = sorted(fls)
-                for f, t in zip(fls, tsvs):
+
+                valid_names = [x[:-5].split("#")[0] for x in fls]
+                print(valid_names[:5])
+                print(tsvs[:5])
+                # valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
+                valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
+
+                print(len(fls), len(valid_tsvs))
+
+                assert(len(fls) == len(valid_tsvs))
+
+                for f, t in zip(fls, valid_tsvs):
                     # #### MusicNet
                     if 'MusicNet' in group:
                         if all([str(elem) not in f for elem in good_ids]):
                             continue
+                    if 'OneSong' in group:
+                        if self.valid_ids:
+                            if t[:-4] not in self.valid_ids:
+                                continue
                     res.append((curr_fls_pth + '/' + f, tsvs_path + '/' + group + '/' + t))
         return res
 
@@ -210,8 +232,9 @@ class EMDATASET(Dataset):
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
+
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label)
+                            audio=audio, unaligned_label=unaligned_label, label=unaligned_label)
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data
@@ -231,10 +254,11 @@ class EMDATASET(Dataset):
         print('POS, NEG', POS, NEG)
         if to_save is not None:
             os.makedirs(to_save, exist_ok=True)
-        print('there are', len(self.pts), 'pts')
+        print('there are', len(self.pts), 'data pts')
         for flac, data in self.pts.items():
             if 'unaligned_label' not in data:
                 continue
+            print(flac)
             audio_inp = data['audio'].float() / 32768.
             MAX_TIME = 5 * 60 * SAMPLE_RATE
             audio_inp_len = len(audio_inp)
@@ -247,7 +271,7 @@ class EMDATASET(Dataset):
                 frame_preds = []
                 vel_preds = []
                 for i_s in range(n_segments):
-                    curr = audio_inp[i_s * seg_len: (i_s + 1) * seg_len].unsqueeze(0).cuda()
+                    curr = audio_inp[i_s * seg_len: (i_s + 1) * seg_len].unsqueeze(0).to(self.device)
                     curr_mel = melspectrogram(curr.reshape(-1, curr.shape[-1])[:, :-1]).transpose(-1, -2)
                     curr_onset_pred, curr_offset_pred, _, curr_frame_pred, curr_velocity_pred = transcriber(curr_mel)
                     onsets_preds.append(curr_onset_pred)
@@ -259,8 +283,10 @@ class EMDATASET(Dataset):
                 frame_pred = torch.cat(frame_preds, dim=1)
                 velocity_pred = torch.cat(vel_preds, dim=1)
             else:
-                audio_inp = audio_inp.unsqueeze(0).cuda()
+                audio_inp = audio_inp.unsqueeze(0).to(self.device)
                 mel = melspectrogram(audio_inp.reshape(-1, audio_inp.shape[-1])[:, :-1]).transpose(-1, -2)
+                # print(next(transcriber.parameters()).is_cuda)
+                # print(type(mel))
                 onset_pred, offset_pred, _, frame_pred, velocity_pred = transcriber(mel)
             print('done predicting.')
             # We assume onset predictions are of length N_KEYS * (len(instruments) + 1),
@@ -270,11 +296,17 @@ class EMDATASET(Dataset):
             onset_pred = onset_pred.detach().squeeze().cpu()
             frame_pred = frame_pred.detach().squeeze().cpu()
 
+            # print(onset_pred.size())
+            # print(frame_pred.size())
+            # print(data['unaligned_label'].shape)
+
             peaks = get_peaks(onset_pred, 3) # we only want local peaks, in a 7-frame neighborhood, 3 to each side.
             onset_pred[~peaks] = 0
 
             unaligned_onsets = (data['unaligned_label'] == 3).float().numpy()
             unaligned_frames = (data['unaligned_label'] >= 2).float().numpy()
+            # print(unaligned_onsets.nonzero())
+            # print(unaligned_onsets.size())
 
             onset_pred_np = onset_pred.numpy()
             frame_pred_np = frame_pred.numpy()
@@ -317,6 +349,14 @@ class EMDATASET(Dataset):
                 # we extend the search area of local max to be ~0.5 second:
                 t_sources_extended = get_margin(t_sources, len(aligned_onsets))
                 # eliminate occupied positions. Allow only a single onset per 5 frames:
+                # print("-------------")
+                # print(t_sources_extended)
+                # print(t_sources)
+                # print(f)
+                # print(aligned_onsets.shape)
+                # print(unaligned_onsets.shape)
+                # print(aligned_onsets[t_sources_extended[0] - 2 : t_sources_extended[0] + 3, f])
+                # print("=============")
                 existing_eliminated = [t_source for t_source in t_sources_extended if (aligned_onsets[t_source - 2: t_source + 3, f] == 0).all()]
                 if len(existing_eliminated) > 0:
                     t_sources_extended = existing_eliminated
@@ -445,7 +485,7 @@ class EMDATASET(Dataset):
             del offset_pred
             del frame_pred
             del velocity_pred
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
 
     '''
         Update labels. Use only alignment without pseudo-labels.
@@ -472,7 +512,7 @@ class EMDATASET(Dataset):
                 frame_preds = []
                 vel_preds = []
                 for i_s in range(n_segments):
-                    curr = audio_inp[i_s * seg_len: (i_s + 1) * seg_len].unsqueeze(0).cuda()
+                    curr = audio_inp[i_s * seg_len: (i_s + 1) * seg_len].unsqueeze(0).to(self.device)
                     curr_mel = melspectrogram(curr.reshape(-1, curr.shape[-1])[:, :-1]).transpose(-1, -2)
                     curr_onset_pred, curr_offset_pred, _, curr_frame_pred, curr_velocity_pred = transcriber(curr_mel)
                     onsets_preds.append(curr_onset_pred)
@@ -484,7 +524,7 @@ class EMDATASET(Dataset):
                 frame_pred = torch.cat(frame_preds, dim=1)
                 velocity_pred = torch.cat(vel_preds, dim=1)
             else:
-                audio_inp = audio_inp.unsqueeze(0).cuda()
+                audio_inp = audio_inp.unsqueeze(0).to(self.device)
                 mel = melspectrogram(audio_inp.reshape(-1, audio_inp.shape[-1])[:, :-1]).transpose(-1, -2)
                 onset_pred, offset_pred, _, frame_pred, velocity_pred = transcriber(mel)
             print('done predicting.')
@@ -617,4 +657,4 @@ class EMDATASET(Dataset):
             del offset_pred
             del frame_pred
             del velocity_pred
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()

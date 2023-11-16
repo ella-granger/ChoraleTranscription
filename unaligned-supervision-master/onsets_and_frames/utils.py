@@ -92,7 +92,7 @@ def get_inactive_instruments(target_onsets, T):
     time, instruments = target_onsets.shape[0], target_onsets.shape[1] // keys
     notes_reshaped = target_onsets.reshape((time, instruments, keys))
     active_instruments = notes_reshaped.max(axis=(0, 2))
-    res = np.zeros((T, instruments, keys), dtype=np.bool)
+    res = np.zeros((T, instruments, keys), dtype=bool)
     for ins in range(instruments):
         if active_instruments[ins] == 0:
             res[:, ins, :] = 1

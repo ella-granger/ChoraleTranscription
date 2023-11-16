@@ -76,6 +76,8 @@ class OnsetsAndFrames(nn.Module):
             ConvStack(input_features, model_size),
             nn.Linear(model_size, output_features * n_instruments)
         )
+        print(output_features, n_instruments)
+        print(output_features * n_instruments)
 
     def forward(self, mel):
         onset_pred = self.onset_stack(mel)
@@ -96,7 +98,7 @@ class OnsetsAndFrames(nn.Module):
         velocity_pred = self.velocity_stack(mel)
         return onset_pred, offset_pred, activation_pred, frame_pred, velocity_pred
 
-    def run_on_batch(self, batch, parallel_model=None, multi=False, positive_weight=2., inv_positive_weight=2.):
+    def run_on_batch(self, batch, parallel_model=None, multi=False, positive_weight=2., inv_positive_weight=2.,loss_function=None):
         audio_label = batch['audio']
 
         onset_label = batch['onset']
@@ -127,9 +129,9 @@ class OnsetsAndFrames(nn.Module):
             predictions['velocity'] = velocity_pred.reshape(*velocity_label.shape)
 
         losses = {
-                'loss/onset': F.binary_cross_entropy(predictions['onset'], onset_label, reduction='none'),
-                'loss/offset': F.binary_cross_entropy(predictions['offset'], offset_label, reduction='none'),
-                'loss/frame': F.binary_cross_entropy(predictions['frame'], frame_label, reduction='none'),
+                'loss/onset': loss_function(predictions["onset"], onset_label),
+                'loss/offset': loss_function(predictions['offset'], offset_label),
+                'loss/frame': loss_function(predictions['frame'], frame_label),
                 # 'loss/velocity': self.velocity_loss(predictions['velocity'], velocity_label, onset_label)
             }
         if 'velocity' in batch:

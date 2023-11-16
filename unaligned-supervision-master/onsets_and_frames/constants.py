@@ -27,3 +27,4 @@ SEQ_LEN = 327680
 DRUM_CHANNEL = 9
 
 DEFAULT_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+# DEFAULT_DEVICE = 'cpu'

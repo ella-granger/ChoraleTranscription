@@ -8,11 +8,17 @@ import librosa
 import soundfile as sf
 from glob import glob
 import numpy as np
+from tqdm import tqdm
 
 
 # src_dir = '/path/to/performance'
-src_dir = 'MusicNetSamples'
-target_root = 'NoteEM_audio'
+src_dir = "./MusicNetSamples"
+# src_dir = '/storageSSD/huiran/WebChoralDataset/OneSong'
+# src_dir = '/storageSSD/huiran/BachChorale/BachChorale'
+target_root = './MusicNetSamples_audio'
+# target_root = '/storageSSD/huiran/WebChoralDataset/OneSong_audio'
+# target_root = '/storageSSD/huiran/BachChorale/BachChorale_audio'
+
 # file_type = '.mp3'
 file_type = '.flac'
 # file_type = '.wav'
@@ -21,7 +27,7 @@ audio_src_files = glob(src_dir + '/**/*' + file_type, recursive=True)
 audio_src_files = sorted(audio_src_files)
 
 print('Beginning pitch shift from', src_dir)
-for f in audio_src_files:
+for f in tqdm(audio_src_files):
     print(f)
     f_split = f.split('/')
     piece, part = f_split[-2:]
@@ -31,7 +37,7 @@ for f in audio_src_files:
         print('/'.join(f_split[: -1]))
         print(src_dir)
         raise e
-    for shift in range(-5, 6):
+    for shift in range(-3, 4):
         print(shift)
         os.makedirs(target_root + '/' + piece + '#' + str(shift), exist_ok=True)
         suffix = part[-len(file_type):]
