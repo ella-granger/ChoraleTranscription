@@ -3,6 +3,7 @@ import numpy as np
 from dtw import *
 import soundfile
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 from tqdm import tqdm
 import random
 import os
@@ -22,8 +23,11 @@ class EMDATASET(Dataset):
                  instrument_map=None, update_instruments=False, transcriber=None,
                  conversion_map=None):
         self.valid_ids = None
-        # with open(audio_path + "/../valid_list.json") as fin:
-        #     self.valid_ids = json.load(fin)
+        try:
+            with open(audio_path + "/../valid_list.json") as fin:
+                self.valid_ids = json.load(fin)
+        except Exception as e:
+            print(e)
         self.audio_path = audio_path
         self.labels_path = labels_path
         self.tsv_path = tsv_path
@@ -43,13 +47,16 @@ class EMDATASET(Dataset):
         self.load_pts(self.file_list)
         self.data = []
         print('Reading files...')
+        print(self.file_list)
+        print(len(self.file_list))
         for input_files in tqdm(self.file_list):
-            data = self.pts[input_files[0]]
-            audio_len = len(data['audio'])
-            minutes = audio_len // (SAMPLE_RATE * 60)
-            copies = minutes
-            for _ in range(copies):
-                self.data.append(input_files)
+            # data = self.pts[input_files[0]]
+            # audio_len = len(data['audio'])
+            # minutes = audio_len // (SAMPLE_RATE * 60)
+            # copies = minutes
+            # for _ in range(copies):
+            #     self.data.append(input_files)
+            self.data.append(input_files)
         random.shuffle(self.data)
 
 
@@ -74,22 +81,23 @@ class EMDATASET(Dataset):
                 fls = os.listdir(curr_fls_pth)
                 fls = sorted(fls)
 
+                if 'program_change_midi' in group:
+                    fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
+
                 valid_names = [x[:-5].split("#")[0] for x in fls]
-                print(valid_names[:5])
-                print(tsvs[:5])
-                # valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
-                valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
+                valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
+                # valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
 
                 print(len(fls), len(valid_tsvs))
 
                 assert(len(fls) == len(valid_tsvs))
 
-                for f, t in zip(fls, valid_tsvs):
+                for f, t in zip(fls[:500], valid_tsvs[:500]):
                     # #### MusicNet
                     if 'MusicNet' in group:
                         if all([str(elem) not in f for elem in good_ids]):
                             continue
-                    if 'OneSong' in group:
+                    if 'OneSong' in group or 'program_change_midi' in group:
                         if self.valid_ids:
                             if t[:-4] not in self.valid_ids:
                                 continue
@@ -111,8 +119,12 @@ class EMDATASET(Dataset):
             instruments.insert(0, 0)
         self.instruments = instruments
         self.instruments = list(set(self.instruments) - set(range(88, 104)) - set(range(112, 150)))
+        ##########
+        # self.instruments = [0]
+        ##########
         print('Dataset instruments:', self.instruments)
         print('Total:', len(self.instruments), 'instruments')
+        # _ = input()
 
     def add_instruments(self):
         for _, f in self.file_list:
@@ -124,23 +136,40 @@ class EMDATASET(Dataset):
         self.instruments = instruments
 
     def __getitem__(self, index):
+        print("HELLO", index)
         data = self.load(*self.data[index])
+        
         result = dict(path=data['path'])
         midi_length = len(data['label'])
         n_steps = self.sequence_length // HOP_LENGTH
-        step_begin = self.random.randint(midi_length - n_steps)
+        # if midi_length > n_steps:
+        #     step_begin = self.random.randint(midi_length - n_steps)
+        # else:
+        #     step_begin = 0
+        step_begin = 0
         step_end = step_begin + n_steps
         begin = step_begin * HOP_LENGTH
         end = begin + self.sequence_length
+
         result['audio'] = data['audio'][begin:end]
+        
         diff = self.sequence_length - len(result['audio'])
-        result['audio'] = torch.cat((result['audio'], torch.zeros(diff, dtype=result['audio'].dtype)))
+        if diff > 0:
+            result['audio'] = torch.cat((result['audio'], torch.zeros(diff, dtype=result['audio'].dtype)))
         result['audio'] = result['audio'].to(self.device)
+
+        diff = n_steps - midi_length
         result['label'] = data['label'][step_begin:step_end, ...]
+        # print(result['label'].size())
+        if diff > 0:
+            result['label'] = F.pad(result['label'], (0, 0, 0, diff))
+        # print(result['label'].size())
         result['label'] = result['label'].to(self.device)
         if 'velocity' in data:
             result['velocity'] = data['velocity'][step_begin:step_end, ...].to(self.device)
             result['velocity'] = result['velocity'].float() / 128.
+            if diff > 0:
+                result['velocity'] = F.pad(result['velocity'], (0, 0, 0, diff))
 
         result['audio'] = result['audio'].float()
         result['audio'] = result['audio'].div_(32768.0)
@@ -150,13 +179,19 @@ class EMDATASET(Dataset):
 
         if 'onset_mask' in data:
             result['onset_mask'] = data['onset_mask'][step_begin:step_end, ...].to(self.device).float()
+            if diff > 0:
+                result['onset_mask'] = F.pad(result['onset_mask'], (0, 0, 0, diff))
         if 'frame_mask' in data:
             result['frame_mask'] = data['frame_mask'][step_begin:step_end, ...].to(self.device).float()
+            if diff > 0:
+                result['frame_mask'] = F.pad(result['frame_mask'], (0, 0, 0, diff))
 
 
         shape = result['frame'].shape
         keys = N_KEYS
         new_shape = shape[: -1] + (shape[-1] // keys, keys)
+        # print(new_shape)
+        # print(result['frame'].size())
         # frame and offset currently do not differentiate between instruments,
         # so we compress them across instrument and save a copy of the original,
         # as 'big_frame' and 'big_offset'
@@ -164,10 +199,13 @@ class EMDATASET(Dataset):
         result['frame'], _ = result['frame'].reshape(new_shape).max(axis=-2)
         result['big_offset'] = result['offset']
         result['offset'], _ = result['offset'].reshape(new_shape).max(axis=-2)
+        # for k, v in result.items():
+        #     print(k, len(v))
         return result
 
     def load(self, audio_path, tsv_path):
         data = self.pts[audio_path]
+        print(audio_path, tsv_path)
         if len(data['audio'].shape) > 1:
             data['audio'] = (data['audio'].float().mean(dim=-1)).short()
         if 'label' in data:
@@ -234,7 +272,7 @@ class EMDATASET(Dataset):
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
 
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label, label=unaligned_label)
+                            audio=audio, unaligned_label=unaligned_label)
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data
@@ -255,7 +293,7 @@ class EMDATASET(Dataset):
         if to_save is not None:
             os.makedirs(to_save, exist_ok=True)
         print('there are', len(self.pts), 'data pts')
-        for flac, data in self.pts.items():
+        for flac, data in tqdm(self.pts.items()):
             if 'unaligned_label' not in data:
                 continue
             print(flac)

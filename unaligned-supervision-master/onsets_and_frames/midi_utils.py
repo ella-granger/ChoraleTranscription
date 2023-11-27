@@ -19,6 +19,7 @@ def midi_to_frames(midi, instruments, conversion_map=None):
     n_channels = len(instruments) + 1
     label = torch.zeros(n_steps, n_keys * n_channels, dtype=torch.uint8)
     for onset, offset, note, vel, instrument in midi:
+        # instrument = 0
         f = int(note) - MIN_MIDI
         if 104 > instrument > 87 or instrument > 111:
             continue

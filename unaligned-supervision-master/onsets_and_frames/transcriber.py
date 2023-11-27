@@ -44,10 +44,12 @@ class ConvStack(nn.Module):
 class OnsetsAndFrames(nn.Module):
     def __init__(self, input_features, output_features, model_complexity=48,
                  onset_complexity=1,
-                 n_instruments=13):
+                 n_instruments=13,
+                 train_mode="ori"):
         nn.Module.__init__(self)
         model_size = model_complexity * 16
         sequence_model = lambda input_size, output_size: BiLSTM(input_size, output_size // 2)
+        self.train_mode = train_mode
 
         onset_model_size = int(onset_complexity * model_size)
         self.onset_stack = nn.Sequential(
@@ -104,6 +106,10 @@ class OnsetsAndFrames(nn.Module):
         onset_label = batch['onset']
         offset_label = batch['offset']
         frame_label = batch['frame']
+        # print(onset_label.size(), onset_label.max())
+        # print(offset_label.size(), offset_label.max())
+        # print(frame_label.size(), frame_label.max())
+
         if 'velocity' in batch:
             velocity_label = batch['velocity']
         mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
@@ -125,37 +131,54 @@ class OnsetsAndFrames(nn.Module):
             'frame': frame_pred.reshape(*frame_label.shape),
             # 'velocity': velocity_pred.reshape(*velocity_label.shape)
         }
+        # print(predictions['onset'].shape)
+        # print(predictions['offset'].shape)
+        # print(predictions['frame'].shape)
+        # _ = input()
         if 'velocity' in batch:
             predictions['velocity'] = velocity_pred.reshape(*velocity_label.shape)
 
-        losses = {
-                'loss/onset': loss_function(predictions["onset"], onset_label),
-                'loss/offset': loss_function(predictions['offset'], offset_label),
-                'loss/frame': loss_function(predictions['frame'], frame_label),
+        if self.train_mode == "SDTW":
+            losses = {
+                'loss/onset': loss_function(predictions["onset"], onset_label).mean(),
+                'loss/offset': loss_function(predictions['offset'], offset_label).mean(),
+                'loss/frame': loss_function(predictions['frame'], frame_label).mean(),
                 # 'loss/velocity': self.velocity_loss(predictions['velocity'], velocity_label, onset_label)
             }
-        if 'velocity' in batch:
-            losses['loss/velocity'] = self.velocity_loss(predictions['velocity'], velocity_label, onset_label)
+        else:
+            losses = {
+                'loss/onset': F.binary_cross_entropy(predictions['onset'], onset_label, reduction='none'),
+                'loss/offset': F.binary_cross_entropy(predictions['offset'], offset_label, reduction='none'),
+                'loss/frame': F.binary_cross_entropy(predictions['frame'], frame_label, reduction='none')
+            }
+            if 'velocity' in batch:
+                losses['loss/velocity'] = self.velocity_loss(predictions['velocity'], velocity_label, onset_label)
+            # print(onset_label.size())
+            onset_mask = 1. * onset_label
+            onset_mask[..., : -N_KEYS] *= (positive_weight - 1)
+            onset_mask[..., -N_KEYS:] *= (inv_positive_weight - 1)
+            onset_mask += 1
+            if 'onset_mask' in batch:
+                onset_mask = onset_mask * batch['onset_mask']
+            # print(onset_mask.size())
+            # print(onset_mask.max(), onset_mask.min())
 
-        onset_mask = 1. * onset_label
-        onset_mask[..., : -N_KEYS] *= (positive_weight - 1)
-        onset_mask[..., -N_KEYS:] *= (inv_positive_weight - 1)
-        onset_mask += 1
-        if 'onset_mask' in batch:
-            onset_mask = onset_mask * batch['onset_mask']
+            offset_mask = 1. * offset_label
+            offset_positive_weight = 2.
+            offset_mask *= (offset_positive_weight - 1)
+            offset_mask += 1.
+            # print(offset_mask.max(), offset_mask.min())
 
-        offset_mask = 1. * offset_label
-        offset_positive_weight = 2.
-        offset_mask *= (offset_positive_weight - 1)
-        offset_mask += 1.
-
-        frame_mask = 1. * frame_label
-        frame_positive_weight = 2.
-        frame_mask *= (frame_positive_weight - 1)
-        frame_mask += 1.
-
-        for loss_key, mask in zip(['onset', 'offset', 'frame'], [onset_mask, offset_mask, frame_mask]):
-            losses['loss/' + loss_key] = (mask * losses['loss/' + loss_key]).mean()
+            frame_mask = 1. * frame_label
+            frame_positive_weight = 2.
+            frame_mask *= (frame_positive_weight - 1)
+            frame_mask += 1.
+            # print(frame_mask.max(), frame_mask.min())
+            for loss_key, mask in zip(['onset', 'offset', 'frame'], [onset_mask, offset_mask, frame_mask]):
+                # print(mask.size())
+                # print(losses['loss/' + loss_key].size())
+                losses['loss/' + loss_key] = (mask * losses['loss/' + loss_key]).mean()
+        # """
 
         return predictions, losses
 
