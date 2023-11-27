@@ -100,6 +100,24 @@ class OnsetsAndFrames(nn.Module):
         velocity_pred = self.velocity_stack(mel)
         return onset_pred, offset_pred, activation_pred, frame_pred, velocity_pred
 
+    def eval_on_batch(self, batch):
+        audio_label = batch['audio']
+
+        onset_label = batch['onset']
+        offset_label = batch['offset']
+        frame_label = batch['frame']
+
+        mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
+        onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)
+
+        predictions = {
+            'onset': onset_pred.reshape(*onset_label.shape),
+            'offset': offset_pred.reshape(*offset_label.shape),
+            'frame': frame_pred.reshape(*frame_label.shape)
+        }
+        return predictions
+        
+
     def run_on_batch(self, batch, parallel_model=None, multi=False, positive_weight=2., inv_positive_weight=2.,loss_function=None):
         audio_label = batch['audio']
 
