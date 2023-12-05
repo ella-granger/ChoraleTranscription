@@ -7,7 +7,7 @@ from sacred.observers import FileStorageObserver
 from torch.nn.utils import clip_grad_norm_
 import torch.nn.functional as F
 # from torch.optim.lr_scheduler import StepLR
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import warnings
@@ -64,6 +64,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         )
     print('len dataset', len(dataset), len(dataset.data))
     print('instruments', dataset.instruments, len(dataset.instruments))
+    train_data, test_data = random_split(dataset, [len(dataset) - 5, 5])
 
     if not multi_ckpt:
         model_complexity = 64 if '512' in transcriber_ckpt else 48
@@ -83,9 +84,10 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
     # We recommend to train first only onset detection. This will already give good note durations because the combined stack receives
     # information from the onset stack
+
     set_diff(transcriber.frame_stack, False)
-    set_diff(transcriber.offset_stack, False)
-    set_diff(transcriber.combined_stack, False)
+    # set_diff(transcriber.offset_stack, False)
+    # set_diff(transcriber.combined_stack, False)
     set_diff(transcriber.velocity_stack, False)
 
     parallel_transcriber = DataParallel(transcriber)
@@ -105,11 +107,12 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
         factor = x.view(-1, x.size(-1)).size(0)
         return result / factor
 
-    # loss_function = SoftDTW(use_cuda=True, gamma=0.1, dist_func=cross_entropy, normalize=False)
-    loss_function = SoftDTW(use_cuda=True, gamma=0.1, dist_func=mse_loss, normalize=False)
+    loss_function = SoftDTW(use_cuda=True, dist_func=cross_entropy, normalize=False)
+    # loss_function = SoftDTW(use_cuda=True, gamma=0.1, dist_func=mse_loss, normalize=False)
 
-    loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
-    loader_cycle = cycle(loader)
+    train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=True)
+    loader_cycle = cycle(train_loader)
+    eval_loader = DataLoader(test_data, 1, shuffle=False, drop_last=False)
     step = 0
     for epoch in range(1, epochs + 1):
         print('epoch', epoch)
@@ -143,6 +146,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
             curr_loader = loader_cycle
             batch = next(curr_loader)
             optimizer.zero_grad()
+            loss_function.gamma = max(0.1, 3 - 0.0001 * step)
             # print(batch)
 
             n_weight = 1 if HOP_LENGTH == 512 else 2
@@ -170,24 +174,77 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
             if clip_gradient_norm:
                 clip_grad_norm_(transcriber.parameters(), clip_gradient_norm)
 
-            # for p in transcriber.parameters():
-            #     g = p.grad
-            #     if g is None:
-            #         # print(p.name, "no grad")
-            #         continue
-            #     else:
-            #         print(p.name, torch.max(g), torch.min(g))
-
-            # _ = input()
-
             optimizer.step()
             itr.set_description(f"loss: {loss.item()}, Onset Precision: {onset_precision}, Onset Recall: {onset_recall}, Pitch Onset Precision: {pitch_onset_precision}, Pitch Onset Recall: {pitch_onset_recall}")
             if step % 20 == 0:
                 sw.add_scalar("Train/Loss", loss.item(), step)
+                sw.add_scalar("Train/gamma", loss_function.gamma, step)
+
                 sw.add_scalar("Train/Onset Precision", onset_precision, step)
                 sw.add_scalar("Train/Onset Recall", onset_recall, step)
                 sw.add_scalar("Train/Pitch Precision", pitch_onset_precision, step)
                 sw.add_scalar("Train/Pitch Recall", pitch_onset_recall, step)
+
+            if step % 200 == 0:
+                transcriber.eval()
+                with torch.no_grad():
+                    eval_cycle = cycle(eval_loader)
+                    total_prec = 0
+                    total_recall = 0
+                    total_p_prec = 0
+                    total_p_recall = 0
+                    for k in tqdm(range(100)):
+                        b = next(eval_cycle)
+                        trans = transcriber.eval_on_batch(b)
+
+                        real_label = b['real_label']
+                        # print(real_label)
+                        # print(real_label.size())
+
+                        onset = (real_label == 3).float()
+                        offset = (real_label == 1).float()
+                        frame = (real_label > 1).float()
+
+                        onset_pred = trans['onset'].detach() > 0.5
+                        onset_total_pp += onset_pred
+                        onset_tp = onset_pred * onset.detach()
+                        onset_total_tp += onset_tp
+                        onset_total_p += onset.detach()
+
+                        onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
+                        onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
+                        
+                        pitch_onset_recall = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_p[..., -N_KEYS:].sum()).item()
+                        pitch_onset_precision = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_pp[..., -N_KEYS:].sum()).item()
+
+                        total_prec += onset_precision
+                        total_recall += onset_recall
+
+                        total_p_prec += pitch_onset_precision
+                        total_p_recall += pitch_onset_recall
+
+                        if k < 5:
+                            sw.add_figure("FramePred/%d" % k, plot_midi(trans["frame"].detach().cpu()[0]), step)
+                            sw.add_figure("FrameGT/%d" % k, plot_midi(frame.cpu()[0]), step)
+                            sw.add_figure("FrameLabel/%d" % k, plot_midi(b["frame"].detach().cpu()[0]), step)
+                            sw.add_figure("OnsetPred/%d" % k, plot_midi(trans["onset"].detach().cpu()[0]), step)
+                            sw.add_figure("OnsetGT/%d" % k, plot_midi(onset.cpu()[0]), step)
+                            # sw.add_figure("PredOffset/%d" % k, plot_midi(trans["offset"].detach().cpu()[0]), step)
+                            # sw.add_figure("GTOffset/%d" % k, plot_midi(offset.cpu()[0]), step)
+
+
+                    total_prec /= 100
+                    total_recall /= 100
+                    total_p_prec /= 100
+                    total_p_recall /= 100
+
+                    sw.add_scalar("Eval/Onset Precision", total_prec, step)
+                    sw.add_scalar("Eval/Onset Recall", total_recall, step)
+                    sw.add_scalar("Eval/Pitch Precision", total_p_prec, step)
+                    sw.add_scalar("Eval/Pitch Recall", total_p_recall, step)
+
+                transcriber.train()
+
             step += 1
                 
 

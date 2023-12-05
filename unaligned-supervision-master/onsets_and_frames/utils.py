@@ -1,6 +1,18 @@
 import torch
 from.constants import *
 import numpy as np
+import matplotlib.pylab as plt
+
+
+def plot_midi(mat):
+    fig, ax = plt.subplots(figsize=(10,4))
+    im = ax.imshow(mat.T, aspect="auto", origin="lower")
+    plt.colorbar(im, ax=ax)
+
+    fig.canvas.draw()
+    plt.close()
+
+    return fig
 
 
 def cycle(iterable):
