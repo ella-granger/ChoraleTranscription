@@ -1,10 +1,10 @@
 {
-    "logdir": "runs/Bach-SDTW-xe-eval-full",
+    "logdir": "runs/Bach-SDTW-xe-eval-full-final-fulllen",
     "transcriber_ckpt": "./ckpts/model_48.pt",
     "multi_ckpt": false,
 
     "checkpoint_interval": 6,
-    "batch_size": 4,
+    "batch_size": 2,
 
     "iterations": 1000,
     "learning_rate": 0.0001,

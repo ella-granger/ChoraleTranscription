@@ -158,6 +158,11 @@ class OnsetsAndFrames(nn.Module):
 
         if self.train_mode == "SDTW":
             losses = {
+                # preds = [predictions["onset"], predictions["offset"], predictions["label"]]
+                # labels = [onset_label, offset_label, frame_label]
+
+                # preds = torch.cat(preds, dims=1)
+                # labels = torch.cat(labels, dims=1)
                 'loss/onset': loss_function(predictions["onset"], onset_label).mean(),
                 'loss/offset': loss_function(predictions['offset'], offset_label).mean(),
                 'loss/frame': loss_function(predictions['frame'], frame_label).mean(),

@@ -19,7 +19,7 @@ class EMDATASET(Dataset):
                  audio_path='NoteEM_audio',
                  labels_path='NoteEm_labels',
                  tsv_path='NoteEM_tsv',
-                 real_path = '/storageSSD/huiran/BachChorale/BachChorale_tsv/BachChorale',
+                 real_path = '/storageSSD/huiran/BachChorale/BachChorale_tsv/midi_align',
                  groups=None, sequence_length=None, seed=42, device=DEFAULT_DEVICE,
                  instrument_map=None, update_instruments=False, transcriber=None,
                  conversion_map=None):
@@ -122,7 +122,7 @@ class EMDATASET(Dataset):
         self.instruments = instruments
         self.instruments = list(set(self.instruments) - set(range(88, 104)) - set(range(112, 150)))
         ##########
-        # self.instruments = [0]
+        self.instruments = [0]
         ##########
         print('Dataset instruments:', self.instruments)
         print('Total:', len(self.instruments), 'instruments')
@@ -143,7 +143,9 @@ class EMDATASET(Dataset):
         
         result = dict(path=data['path'])
         midi_length = len(data['label'])
+        audio_length = len(data["audio"])
         n_steps = self.sequence_length // HOP_LENGTH
+        real_length = audio_length // HOP_LENGTH
         # print(midi_length, n_steps)
         if midi_length > n_steps:
             step_begin = self.random.randint(midi_length - n_steps)
@@ -173,11 +175,12 @@ class EMDATASET(Dataset):
         # print(result['label'].size())
         result['label'] = result['label'].to(self.device)
 
-        result['real_label'] = data['real_label'][step_begin:step_end, ...]
-        real_diff = n_steps - len(result['real_label'])
-        if real_diff > 0:
-            result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
-        result['real_label'] = result['real_label'].to(self.device)
+        # if "real_label" in data:
+        #     result['real_label'] = data['real_label'][step_begin:step_end, ...]
+        #     real_diff = n_steps - len(result['real_label'])
+        #     if real_diff > 0:
+        #         result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
+        #         result['real_label'] = result['real_label'].to(self.device)
         # print(result['real_label'].size())
 
         if 'velocity' in data:
@@ -215,7 +218,7 @@ class EMDATASET(Dataset):
         result['big_offset'] = result['offset']
         result['offset'], _ = result['offset'].reshape(new_shape).max(axis=-2)
 
-        result['real_length'] = min(midi_length, n_steps)
+        result['real_length'] = real_length
 
         # for k, v in result.items():
         #     if k != "real_length":
@@ -290,13 +293,16 @@ class EMDATASET(Dataset):
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
-                real_midi = self.real_path + "/" + tsv.split('/')[-1]
-                real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
+                # real_midi = self.real_path + "/" + tsv.split('/')[-1]
+                # print(real_midi)
+                # real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
-                real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
+                # real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
 
+                # print(unaligned_label.shape)
+                # print(real_label.shape)
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label, label=unaligned_label, real_label=real_label)
+                            audio=audio, unaligned_label=unaligned_label) # , label=unaligned_label, real_label=real_label)
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data

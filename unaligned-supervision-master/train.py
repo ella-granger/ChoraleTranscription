@@ -114,6 +114,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
     loader_cycle = cycle(train_loader)
     eval_loader = DataLoader(test_data, 1, shuffle=False, drop_last=False)
     step = 0
+    max_prec = 0
     for epoch in range(1, epochs + 1):
         print('epoch', epoch)
         if device != "cpu":
@@ -197,7 +198,8 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         b = next(eval_cycle)
                         trans = transcriber.eval_on_batch(b)
 
-                        real_label = b['real_label']
+                        # real_label = b['real_label']
+                        real_label = b['label']
                         # print(real_label)
                         # print(real_label.size())
 
@@ -246,13 +248,14 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                 transcriber.train()
 
             step += 1
-                
 
-        save_condition = epoch % checkpoint_interval == 1
+        save_condition = (total_prec > max_prec)
         if save_condition:
-            torch.save(transcriber, os.path.join(logdir, 'transcriber_{}.pt'.format(epoch)))
+            max_prec = total_prec
+            torch.save(transcriber, os.path.join(logdir, 'transcriber_{}_{}.pt'.format(epoch, step)))
             torch.save(optimizer.state_dict(), os.path.join(logdir, 'last-optimizer-state.pt'))
             torch.save({'instrument_mapping': dataset.instruments},
                        os.path.join(logdir, 'instrument_mapping.pt'.format(epoch)))
+            print("SAVE:", max_prec)
 
 
