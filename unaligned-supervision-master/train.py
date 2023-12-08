@@ -32,7 +32,6 @@ def config():
     multi_ckpt = False # Flag if the ckpt was trained on pitch only or instrument-sensitive. The provided checkpoints were trained on pitch only.
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    sequence_length = SEQ_LEN #if HOP_LENGTH == 512 else 3 * SEQ_LEN // 4
 
 
 @ex.automain
@@ -46,10 +45,12 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
     print_config(ex.current_run)
     save_config(ex.current_run.config, logdir + "/config.json")
+    print("HELLO")
 
     os.makedirs(logdir, exist_ok=True)
     os.makedirs(labels_path, exist_ok=True)
 
+    print("HELLO1")
     conversion_map = None
     instrument_map = None
     dataset = EMDATASET(audio_path=train_data_path,
@@ -62,6 +63,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         instrument_map=instrument_map,
                         conversion_map=conversion_map
                         )
+    print("HELLO2")
     print('len dataset', len(dataset), len(dataset.data))
     print('instruments', dataset.instruments, len(dataset.instruments))
     train_data, test_data = random_split(dataset, [len(dataset) - 5, 5])
@@ -141,6 +143,10 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
         onset_total_pp = 0.
         onset_total_p = 0.
 
+        frame_total_tp = 0.
+        frame_total_pp = 0.
+        frame_total_p = 0.
+
         # itr = tqdm(loader)
         itr = tqdm(range(iterations))
         for _ in itr:
@@ -157,16 +163,17 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                                                                            loss_function=loss_function)
 
             onset_pred = transcription['onset'].detach() > 0.5
-            onset_total_pp += onset_pred
             onset_tp = onset_pred * batch['onset'].detach()
+            frame_pred = transcription['frame'].detach() > 0.5
+            frame_tp = frame_pred * batch['frame'].detach()
+            
+            onset_total_pp += onset_pred
             onset_total_tp += onset_tp
             onset_total_p += batch['onset'].detach()
 
-            onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
-            onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
-
-            pitch_onset_recall = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_p[..., -N_KEYS:].sum()).item()
-            pitch_onset_precision = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_pp[..., -N_KEYS:].sum()).item()
+            frame_total_pp += frame_pred
+            frame_total_tp += frame_tp
+            frame_total_p += batch['frame'].detach()
 
             transcription_loss = sum(transcription_losses.values())
             loss = transcription_loss
@@ -178,22 +185,47 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
             optimizer.step()
             itr.set_description(f"loss: {loss.item()}, Onset Precision: {onset_precision}, Onset Recall: {onset_recall}, Pitch Onset Precision: {pitch_onset_precision}, Pitch Onset Recall: {pitch_onset_recall}")
             if step % 20 == 0:
+                onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
+                onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
+                onset_f1 = 2 * onset_recall * onset_precision / (onset_precision + onset_recall)
+
+                pitch_onset_recall = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_p[..., -N_KEYS:].sum()).item()
+                pitch_onset_precision = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_pp[..., -N_KEYS:].sum()).item()
+                pitch_f1 = 2 * pitch_onset_recall * pitch_onset_precision / (pitch_onset_recall + pitch_onset_precision)
+                frame_recall = (frame_total_tp.sum() / frame_total_p.sum()).item()
+                frame_prec = (frame_total_tp.sum() / frame_total_pp.sum()).item()
+                frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+                
                 sw.add_scalar("Train/Loss", loss.item(), step)
                 sw.add_scalar("Train/gamma", loss_function.gamma, step)
 
                 sw.add_scalar("Train/Onset Precision", onset_precision, step)
                 sw.add_scalar("Train/Onset Recall", onset_recall, step)
+                sw.add_scalar("Train/Onset F1", onset_f1, step)
                 sw.add_scalar("Train/Pitch Precision", pitch_onset_precision, step)
                 sw.add_scalar("Train/Pitch Recall", pitch_onset_recall, step)
+                sw.add_scalar("Train/Pitch F1", pitch_f1, step)
+                sw.add_scalar("Train/Frame Precision", frame_prec, step)
+                sw.add_scalar("Train/Frame Recall", frame_recall, step)
+                sw.add_scalar("Train/Frame F1", frame_f1, step)
+
+                onset_total_pp = 0.0
+                onset_total_tp = 0.0
+                onset_total_p = 0.0
+                frame_total_pp = 0.0
+                frame_total_tp = 0.0
+                frame_total_p = 0.0
 
             if step % 200 == 0:
                 transcriber.eval()
                 with torch.no_grad():
                     eval_cycle = cycle(eval_loader)
-                    total_prec = 0
-                    total_recall = 0
-                    total_p_prec = 0
-                    total_p_recall = 0
+                    onset_total_pp_eval = 0.0
+                    onset_total_tp_eval = 0.0
+                    onset_total_p_eval = 0.0
+                    frame_total_pp_eval = 0.0
+                    frame_total_tp_eval = 0.0
+                    frame_total_p_eval = 0.0
                     for k in tqdm(range(100)):
                         b = next(eval_cycle)
                         trans = transcriber.eval_on_batch(b)
@@ -208,22 +240,18 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         frame = (real_label > 1).float()
 
                         onset_pred = trans['onset'].detach() > 0.5
-                        onset_total_pp += onset_pred
                         onset_tp = onset_pred * onset.detach()
-                        onset_total_tp += onset_tp
-                        onset_total_p += onset.detach()
-
-                        onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
-                        onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
                         
-                        pitch_onset_recall = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_p[..., -N_KEYS:].sum()).item()
-                        pitch_onset_precision = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_pp[..., -N_KEYS:].sum()).item()
+                        onset_total_pp_eval += onset_pred
+                        onset_total_tp_eval += onset_tp
+                        onset_total_p_eval += onset.detach()
 
-                        total_prec += onset_precision
-                        total_recall += onset_recall
+                        frame_pred = trans['frame'].detach() > 0.5
+                        frame_tp = frame_pred * frame.detach()
 
-                        total_p_prec += pitch_onset_precision
-                        total_p_recall += pitch_onset_recall
+                        frame_total_pp_eval += frame_pred
+                        frame_total_tp_eval += frame_tp
+                        frame_total_p_eval += frame.detach()
 
                         if k < 5:
                             sw.add_figure("FramePred/%d" % k, plot_midi(trans["frame"].detach().cpu()[0]), step)
@@ -235,15 +263,25 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                             # sw.add_figure("GTOffset/%d" % k, plot_midi(offset.cpu()[0]), step)
 
 
-                    total_prec /= 100
-                    total_recall /= 100
-                    total_p_prec /= 100
-                    total_p_recall /= 100
+                    total_recall = (onset_total_tp_eval.sum() / onset_total_p_eval.sum()).item()
+                    total_prec = (onset_total_tp_eval.sum() / onset_total_pp_eval.sum()).item()
+                    total_f1 = 2 * total_recall * total_prec / (total_recall + total_prec)
+                    total_p_recall = (onset_total_tp_eval[..., -N_KEYS:].sum() / onset_total_p_eval[..., -N_KEYS:].sum()).item()
+                    total_p_prec = (onset_total_tp_eval[..., -N_KEYS:].sum() / onset_total_pp_eval[..., -N_KEYS:].sum()).item()
+                    total_p_f1 = 2 * total_p_recall * total_p_prec / (total_p_recall + total_p_prec)
+                    frame_recall = (frame_total_tp_eval.sum() / frame_total_p_eval.sum()).item()
+                    frame_prec = (frame_total_tp_eval.sum() / frame_total_pp_eval.sum()).item()
+                    frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
 
                     sw.add_scalar("Eval/Onset Precision", total_prec, step)
                     sw.add_scalar("Eval/Onset Recall", total_recall, step)
+                    sw.add_scalar("Eval/Onset F1", total_f1, step)
                     sw.add_scalar("Eval/Pitch Precision", total_p_prec, step)
                     sw.add_scalar("Eval/Pitch Recall", total_p_recall, step)
+                    sw.add_scalar("Eval/Pitch F1", total_p_f1, step)
+                    sw.add_scalar("Eval/Frame Precision", frame_prec, step)
+                    sw.add_scalar("Eval/Frame Recall", frame_recall, step)
+                    sw.add_scalar("Eval/Frame F1", frame_f1, step)
 
                 transcriber.train()
 

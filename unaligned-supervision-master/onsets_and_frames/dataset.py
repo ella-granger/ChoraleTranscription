@@ -33,9 +33,11 @@ class EMDATASET(Dataset):
         self.labels_path = labels_path
         self.tsv_path = tsv_path
         self.real_path = real_path
+        
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
+        
         self.groups = groups
         self.conversion_map = conversion_map
         self.file_list = self.files(self.groups)
@@ -70,6 +72,8 @@ class EMDATASET(Dataset):
         tsvs_path = self.tsv_path
         res = []
         good_ids = list(range(1788, 1794))
+        # self.valid_ids = [str(x) for x in good_ids]
+        print(self.valid_ids)
         # good_ids += list(range(2075, 2084))
         # good_ids += list(range(1817, 1820))
         # good_ids += list(range(2202, 2205))
@@ -82,13 +86,17 @@ class EMDATASET(Dataset):
                 curr_fls_pth = self.path + '/' + group + '#{}'.format(shft)
                 fls = os.listdir(curr_fls_pth)
                 fls = sorted(fls)
+                print(fls)
+                print(tsvs)
 
                 if 'program_change_midi' in group:
                     fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
 
                 valid_names = [x[:-5].split("#")[0] for x in fls]
-                valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
-                # valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
+                if "MusicNet" in group:
+                    valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
+                else:
+                    valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
 
                 print(len(fls), len(valid_tsvs))
 

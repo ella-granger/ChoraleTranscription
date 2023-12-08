@@ -11,9 +11,11 @@
     "learning_rate_decay_steps": 10000,
     "clip_gradient_norm": false,
     "epochs": 30,
+    "sequence_length": 10240,
 
     "train_data_path": "./MusicNetSamples_audio",
     "labels_path": "./MusicNetSamples_labels",
     "tsv_path": "./MusicNetSamples_tsv",
-    "train_groups": ["MusicNetSamples"]
+    "train_groups": ["MusicNetSamples"],
+    "train_mode": "ori"
 }
