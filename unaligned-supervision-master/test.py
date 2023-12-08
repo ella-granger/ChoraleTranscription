@@ -42,8 +42,13 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
     logdir = Path(logdir)
     ckpt = list(logdir.glob("transcriber_*.pt"))
     e = [int(x.stem.split("_")[1]) for x in ckpt]
+    print(e)
     e.sort()
+    print(e)
     e = e[-1]
+    print(e)
+    e = 6
+    print(e)
     ckpt = logdir / ("transcriber_%d_%d000.pt" % (e, e))
     print(ckpt)
     _ = input()
@@ -57,7 +62,7 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
 
     transcriber.eval()
 
-    """
+    # """
     dataset.update_pts(transcriber,
                        POS=POS,
                        NEG=NEG,
@@ -65,7 +70,7 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
                        first=False,
                        update=True,
                        BEST_BON=False)
-    """
+    # """
 
     onset_p = np.zeros(10)
     onset_pp = np.zeros(10)
@@ -74,7 +79,7 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
     frame_pp = np.zeros(10)
     frame_tp = np.zeros(10)
     th = np.arange(10)
-    for batch in loader:
+    for batch in tqdm(loader):
         with torch.no_grad():
             transcription = transcriber.eval_on_batch(batch)
             # fig, axs = plt.subplots(5, 1, figsize=(10, 10))
@@ -118,31 +123,18 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
             for t in th:
                 onset_pred = transcription['onset'].detach() > (t / 10)
                 onset_tp_i = onset_pred * onset.detach() # batch['onset'].detach()
-                onset_p = onset.detach() # batch['onset'].detach()
+                onset_p_i = onset.detach() # batch['onset'].detach()
                 frame_pred = transcription['frame'].detach() > (t / 10)
-                frame_tp_i = frame_pred * frame.datach()
-                frame_p = frame.detach()
+                frame_tp_i = frame_pred * frame.detach()
+                frame_p_i = frame.detach()
 
-                onset_p[int(t)] += onset_p.sum().item()
+                onset_p[int(t)] += onset_p_i.sum().item()
                 onset_pp[int(t)] += onset_pred.sum().item()
                 onset_tp[int(t)] += onset_tp_i.sum().item()
 
-                frame_p[int(t)] += frame_p.sum().item()
+                frame_p[int(t)] += frame_p_i.sum().item()
                 frame_pp[int(t)] += frame_pred.sum().item()
                 frame_tp[int(t)] += frame_tp_i.sum().item()
-                
-                # onset_recall = (onset_tp.sum() / batch['onset'].detach().sum()).item()
-                onset_recall = (onset_tp.sum() / onset.detach().sum()).item()
-                onset_precision = (onset_tp.sum() / onset_pred.sum()).item()
-
-                pitch_onset_recall = (onset_tp[..., -N_KEYS:].sum() / onset_p[..., -N_KEYS:].sum()).item()
-                pitch_onset_precision = (onset_tp[..., -N_KEYS:].sum() / onset_pred[..., -N_KEYS:].sum()).item()
-
-                total_p[int(t)] += onset_precision
-                total_r[int(t)] += onset_recall
-
-                total_pp[int(t)] = pitch_onset_precision
-                total_pr[int(t)] = pitch_onset_recall
 
     print("th\tn_acc\tn_rec\tn_f1\tf_acc\tf_rec\tf_f1")
     for t in th:
