@@ -67,10 +67,13 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
                        BEST_BON=False)
     """
 
-    total_p = np.zeros(10)
-    total_r = np.zeros(10)
-    total_pp = np.zeros(10)
-    total_pr = np.zeros(10)
+    onset_p = np.zeros(10)
+    onset_pp = np.zeros(10)
+    onset_tp = np.zeros(10)
+    frame_p = np.zeros(10)
+    frame_pp = np.zeros(10)
+    frame_tp = np.zeros(10)
+    th = np.arange(10)
     for batch in loader:
         with torch.no_grad():
             transcription = transcriber.eval_on_batch(batch)
@@ -96,24 +99,38 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
             # print(sequence_length)
             # _ = input()
 
-            th = np.arange(10)
-
             real_label = batch["real_label"]
             onset = (real_label == 3).float()
             offset = (real_label == 1).float()
             frame = (real_label > 1).float()
+            shape = frame.shape
+            keys = N_KEYS
+            new_shape = shape[:-1] + (shape[-1] // keys, keys)
+            frame, _ = frame.reshape(new_shape).max(axis=-2)
 
             transcription['onset'] = transcription['onset'][:, :batch["real_length"][0], :]
             transcription['offset'] = transcription['offset'][:, :batch["real_length"][0], :]
             transcription['frame'] = transcription['frame'][:, :batch["real_length"][0], :]
 
             onset = onset[:, :batch["real_length"][0], :]
+            frame = frame[:, :batch["real_length"][0], :]
 
             for t in th:
                 onset_pred = transcription['onset'].detach() > (t / 10)
-                onset_tp = onset_pred * onset.detach() # batch['onset'].detach()
+                onset_tp_i = onset_pred * onset.detach() # batch['onset'].detach()
                 onset_p = onset.detach() # batch['onset'].detach()
+                frame_pred = transcription['frame'].detach() > (t / 10)
+                frame_tp_i = frame_pred * frame.datach()
+                frame_p = frame.detach()
 
+                onset_p[int(t)] += onset_p.sum().item()
+                onset_pp[int(t)] += onset_pred.sum().item()
+                onset_tp[int(t)] += onset_tp_i.sum().item()
+
+                frame_p[int(t)] += frame_p.sum().item()
+                frame_pp[int(t)] += frame_pred.sum().item()
+                frame_tp[int(t)] += frame_tp_i.sum().item()
+                
                 # onset_recall = (onset_tp.sum() / batch['onset'].detach().sum()).item()
                 onset_recall = (onset_tp.sum() / onset.detach().sum()).item()
                 onset_precision = (onset_tp.sum() / onset_pred.sum()).item()
@@ -126,8 +143,15 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
 
                 total_pp[int(t)] = pitch_onset_precision
                 total_pr[int(t)] = pitch_onset_recall
-    print(total_p / len(dataset))
-    print(total_r / len(dataset))
-    print(total_pp / len(dataset))
-    print(total_pr / len(dataset))
+
+    print("th\tn_acc\tn_rec\tn_f1\tf_acc\tf_rec\tf_f1")
+    for t in th:
+        idx = int(t)
+        onset_acc = onset_tp[idx] / onset_pp[idx]
+        onset_rec = onset_tp[idx] / onset_p[idx]
+        onset_f1 = 2 * onset_acc * onset_rec / (onset_acc + onset_rec)
+        frame_acc = frame_tp[idx] / frame_pp[idx]
+        frame_rec = frame_tp[idx] / frame_p[idx]
+        frame_f1 = 2 * frame_acc * frame_rec / (frame_acc + frame_rec)
+        print("%.1f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f" % (t / 10, onset_acc, onset_rec, onset_f1, frame_acc, frame_rec, frame_f1))
 
