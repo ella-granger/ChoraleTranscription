@@ -50,23 +50,33 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
     os.makedirs(logdir, exist_ok=True)
     os.makedirs(labels_path, exist_ok=True)
 
-    print("HELLO1")
     conversion_map = None
     instrument_map = None
-    dataset = EMDATASET(audio_path=train_data_path,
-                        labels_path=labels_path,
-                        tsv_path=tsv_path,
-                        groups=train_groups,
-                        sequence_length=sequence_length,
-                        seed=42,
-                        device=device,
-                        instrument_map=instrument_map,
-                        conversion_map=conversion_map
-                        )
-    print("HELLO2")
+    train_data = EMDATASET(audio_path=train_data_path,
+                           labels_path=labels_path,
+                           tsv_path=tsv_path,
+                           groups=train_groups,
+                           sequence_length=sequence_length,
+                           seed=42,
+                           device=device,
+                           instrument_map=instrument_map,
+                           conversion_map=conversion_map,
+                           valid_list="/storageSSD/huiran/BachChorale/train.json"
+                           )
+    valid_data = EMDATASET(audio_path=train_data_path,
+                           labels_path=labels_path,
+                           tsv_path=tsv_path,
+                           groups=train_groups,
+                           sequence_length=sequence_length,
+                           seed=42,
+                           device=device,
+                           instrument_map=instrument_map,
+                           conversion_map=conversion_map,
+                           valid_list="/storageSSD/huiran/BachChorale/valid.json"
+                           )
     print('len dataset', len(dataset), len(dataset.data))
     print('instruments', dataset.instruments, len(dataset.instruments))
-    train_data, test_data = random_split(dataset, [len(dataset) - 5, 5])
+    # train_data, test_data = random_split(dataset, [len(dataset) - 5, 5])
 
     if not multi_ckpt:
         model_complexity = 64 if '512' in transcriber_ckpt else 48
@@ -114,7 +124,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
     train_loader = DataLoader(train_data, batch_size, shuffle=True, drop_last=True)
     loader_cycle = cycle(train_loader)
-    eval_loader = DataLoader(test_data, 1, shuffle=False, drop_last=False)
+    eval_loader = DataLoader(valid_data, 1, shuffle=False, drop_last=False)
     step = 0
     max_f1 = 0
     for epoch in range(1, epochs + 1):
@@ -127,14 +137,14 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
         # """
         with torch.no_grad():
             if epoch % 1 == 0:
-                dataset.update_pts(parallel_transcriber,
-                                   POS=POS,
-                                   NEG=NEG,
-                                   to_save=logdir + '/alignments', # MIDI alignments and predictions will be saved here
-                                   first=epoch == 1,
-                                   update=True,
-                                   BEST_BON=epoch > 5 # after 5 epochs, update label only if bag of notes distance improved
-                               )
+                train_data.update_pts(parallel_transcriber,
+                                      POS=POS,
+                                      NEG=NEG,
+                                      to_save=logdir + '/alignments', # MIDI alignments and predictions will be saved here
+                                      first=epoch == 1,
+                                      update=True,
+                                      BEST_BON=epoch > 5 # after 5 epochs, update label only if bag of notes distance improved
+                                      )
         # """
 
         transcriber.train()
@@ -231,8 +241,8 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         b = next(eval_cycle)
                         trans = transcriber.eval_on_batch(b)
 
-                        # real_label = b['real_label']
-                        real_label = b['label']
+                        real_label = b['real_label']
+                        # real_label = b['label']
                         # print(real_label)
                         # print(real_label.size())
 

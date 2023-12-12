@@ -22,10 +22,10 @@ class EMDATASET(Dataset):
                  real_path = '/storageSSD/huiran/BachChorale/BachChorale_tsv/midi_align',
                  groups=None, sequence_length=None, seed=42, device=DEFAULT_DEVICE,
                  instrument_map=None, update_instruments=False, transcriber=None,
-                 conversion_map=None):
+                 conversion_map=None, valid_list=None):
         self.valid_ids = None
         try:
-            with open(audio_path + "/../valid_list.json") as fin:
+            with open(valid_list) as fin:
                 self.valid_ids = json.load(fin)
         except Exception as e:
             print(e)
@@ -89,8 +89,8 @@ class EMDATASET(Dataset):
                 print(fls)
                 print(tsvs)
 
-                if 'program_change_midi' in group:
-                    fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
+                # if 'program_change_midi' in group:
+                fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
 
                 valid_names = [x[:-5].split("#")[0] for x in fls]
                 if "MusicNet" in group:
@@ -183,13 +183,13 @@ class EMDATASET(Dataset):
         # print(result['label'].size())
         result['label'] = result['label'].to(self.device)
 
-        # if "real_label" in data:
-        #     result['real_label'] = data['real_label'][step_begin:step_end, ...]
-        #     real_diff = n_steps - len(result['real_label'])
-        #     if real_diff > 0:
-        #         result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
-        #     result['real_label'] = result['real_label'].to(self.device)
-        # print(result['real_label'].size())
+        if "real_label" in data:
+            result['real_label'] = data['real_label'][step_begin:step_end, ...]
+            real_diff = n_steps - len(result['real_label'])
+            if real_diff > 0:
+                result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
+            result['real_label'] = result['real_label'].to(self.device)
+        print(result['real_label'].size())
 
         if 'velocity' in data:
             result['velocity'] = data['velocity'][step_begin:step_end, ...].to(self.device)
@@ -301,16 +301,16 @@ class EMDATASET(Dataset):
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
-                # real_midi = self.real_path + "/" + tsv.split('/')[-1]
+                real_midi = self.real_path + "/" + tsv.split('/')[-1]
                 # print(real_midi)
-                # real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
+                real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
-                # real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
+                real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
 
                 # print(unaligned_label.shape)
                 # print(real_label.shape)
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label) #, real_label=real_label) # , label=unaligned_label, real_label=real_label)
+                            audio=audio, unaligned_label=unaligned_label, real_label=real_label) # , label=unaligned_label, real_label=real_label)
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data
