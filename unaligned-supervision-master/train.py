@@ -183,7 +183,6 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                 clip_grad_norm_(transcriber.parameters(), clip_gradient_norm)
 
             optimizer.step()
-            itr.set_description(f"loss: {loss.item()}, Onset Precision: {onset_precision}, Onset Recall: {onset_recall}, Pitch Onset Precision: {pitch_onset_precision}, Pitch Onset Recall: {pitch_onset_recall}")
             if step % 20 == 0:
                 onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
                 onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
@@ -195,6 +194,8 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                 frame_recall = (frame_total_tp.sum() / frame_total_p.sum()).item()
                 frame_prec = (frame_total_tp.sum() / frame_total_pp.sum()).item()
                 frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+
+                itr.set_description(f"loss: {loss.item()}, Onset Precision: {onset_precision}, Onset Recall: {onset_recall}, Pitch Onset Precision: {pitch_onset_precision}, Pitch Onset Recall: {pitch_onset_recall}")
                 
                 sw.add_scalar("Train/Loss", loss.item(), step)
                 sw.add_scalar("Train/gamma", loss_function.gamma, step)
@@ -230,16 +231,27 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         b = next(eval_cycle)
                         trans = transcriber.eval_on_batch(b)
 
-                        # real_label = b['real_label']
-                        real_label = b['label']
+                        real_label = b['real_label']
+                        # real_label = b['label']
                         # print(real_label)
                         # print(real_label.size())
 
                         onset = (real_label == 3).float()
                         offset = (real_label == 1).float()
                         frame = (real_label > 1).float()
+                        shape = frame.shape
+                        keys = N_KEYS
+                        new_shape = shape[: -1] + (shape[-1] // keys, keys)
+                        frame, _ = frame.reshape(new_shape).max(axis=-2)
+                        # onset = b['onset']
+                        # offset = b['offset']
+                        # frame = b['frame']
 
                         onset_pred = trans['onset'].detach() > 0.5
+                        # print(type(onset_pred))
+                        # print(type(onset.detach()))
+                        # print(onset_pred.device)
+                        # print(onset.detach().device)
                         onset_tp = onset_pred * onset.detach()
                         
                         onset_total_pp_eval += onset_pred

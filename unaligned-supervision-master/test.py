@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import numpy as np
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -127,19 +128,15 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
                 for shift in (0, 1, 2):
                     onset_p_i = onset.detach() # batch['onset'].detach()
                     frame_p_i = frame.detach()
+                    frame_tp_i = frame_pred * frame_p_i
                     if shift == 0:
                         onset_tp_i = onset_pred * onset_p_i # batch['onset'].detach()
-                        frame_tp_i = frame_pred * frame_p_i
                     else:
-                        shift_onset = F.pad(onset_pred[:, shift:, :], (0, shift, 0, 0))
-                        shift_frame = F.pad(frame_pred[:, shift:, :], (0, shift, 0, 0))
+                        shift_onset = F.pad(onset_pred[:, shift:, :], (0, 0, 0, shift))
                         onset_tp_i = shift_onset * onset_p_i
-                        frame_tp_i = shift_frame * frame_p_i
 
-                        shift_onset = F.pad(onset_pred[:, :-shift, :], (shift, 0, 0, 0))
-                        shift_frame = F.pad(frame_pred[:, :-shift, :], (shift, 0, 0, 0))
+                        shift_onset = F.pad(onset_pred[:, :-shift, :], (0, 0, shift, 0))
                         onset_tp_i += shift_onset * onset_p_i
-                        frame_tp_i += shift_frame * frame_p_i
 
                     onset_p[int(t) + shift * 10] += onset_p_i.sum().item()
                     onset_pp[int(t) + shift * 10] += onset_pred.sum().item()
@@ -149,21 +146,19 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
                     frame_pp[int(t) + shift * 10] += frame_pred.sum().item()
                     frame_tp[int(t) + shift * 10] += frame_tp_i.sum().item()
 
-                    if shift > 0:
-                        onset_tp[int(t) + shift * 10] += onset_tp[int(t) + (shift - 1) * 10]
-                        frame_tp[int(t) + shift * 10] += frame_tp[int(t) + (shift - 1) * 10]
-
-    print(" \t0ms\t\t\t\t\t\t30ms\t\t\t\t\t\t60ms")
+    print(" \t0ms\t \t \t \t \t \t30ms\t \t \t \t \t \t60ms")
     print("th\tn_acc\tn_rec\tn_f1\tf_acc\tf_rec\tf_f1\tn_acc\tn_rec\tn_f1\tf_acc\tf_rec\tf_f1\tn_acc\tn_rec\tn_f1\tf_acc\tf_rec\tf_f1")
-    for t in th:
+    for t in th[1:]:
         results = [t / 10]
         idx = int(t)
         for shift in (0, 1, 2):
+            if shift > 0 and idx > 0:
+                onset_tp[idx + 10 * shift] += onset_tp[idx + 10 * (shift - 1)]
             results.append(onset_tp[idx + 10 * shift] / onset_pp[idx + 10 * shift])
             results.append(onset_tp[idx + 10 * shift] / onset_p[idx + 10 * shift])
-            results.append(2 * onset_acc * onset_rec / (onset_acc + onset_rec))
+            results.append(2 * results[-1] * results[-2] / (results[-1] + results[-2]))
             results.append(frame_tp[idx + 10 * shift] / frame_pp[idx + 10 * shift])
             results.append(frame_tp[idx + 10 * shift] / frame_p[idx + 10 * shift])
-            results.append(2 * frame_acc * frame_rec / (frame_acc + frame_rec))
-        print("%.1f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f" % results)
+            results.append(2 * results[-1] * results[-2] / (results[-1] + results[-2]))
+        print("%.1f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f" % tuple(results))
 
