@@ -183,12 +183,12 @@ class EMDATASET(Dataset):
         # print(result['label'].size())
         result['label'] = result['label'].to(self.device)
 
-        if "real_label" in data:
-            result['real_label'] = data['real_label'][step_begin:step_end, ...]
-            real_diff = n_steps - len(result['real_label'])
-            if real_diff > 0:
-                result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
-            result['real_label'] = result['real_label'].to(self.device)
+        # if "real_label" in data:
+        #     result['real_label'] = data['real_label'][step_begin:step_end, ...]
+        #     real_diff = n_steps - len(result['real_label'])
+        #     if real_diff > 0:
+        #         result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
+        #     result['real_label'] = result['real_label'].to(self.device)
         # print(result['real_label'].size())
 
         if 'velocity' in data:
@@ -301,16 +301,16 @@ class EMDATASET(Dataset):
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
-                real_midi = self.real_path + "/" + tsv.split('/')[-1]
-                print(real_midi)
-                real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
+                # real_midi = self.real_path + "/" + tsv.split('/')[-1]
+                # print(real_midi)
+                # real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
-                real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
+                # real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
 
                 # print(unaligned_label.shape)
                 # print(real_label.shape)
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label, real_label=real_label) # , label=unaligned_label, real_label=real_label)
+                            audio=audio, unaligned_label=unaligned_label) #, real_label=real_label) # , label=unaligned_label, real_label=real_label)
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data

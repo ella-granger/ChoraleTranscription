@@ -116,7 +116,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
     loader_cycle = cycle(train_loader)
     eval_loader = DataLoader(test_data, 1, shuffle=False, drop_last=False)
     step = 0
-    max_prec = 0
+    max_f1 = 0
     for epoch in range(1, epochs + 1):
         print('epoch', epoch)
         if device != "cpu":
@@ -231,8 +231,8 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                         b = next(eval_cycle)
                         trans = transcriber.eval_on_batch(b)
 
-                        real_label = b['real_label']
-                        # real_label = b['label']
+                        # real_label = b['real_label']
+                        real_label = b['label']
                         # print(real_label)
                         # print(real_label.size())
 
@@ -277,13 +277,22 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
                     total_recall = (onset_total_tp_eval.sum() / onset_total_p_eval.sum()).item()
                     total_prec = (onset_total_tp_eval.sum() / onset_total_pp_eval.sum()).item()
-                    total_f1 = 2 * total_recall * total_prec / (total_recall + total_prec)
+                    if total_recall + total_prec != 0:
+                        total_f1 = 2 * total_recall * total_prec / (total_recall + total_prec)
+                    else:
+                        total_f1 = 0
                     total_p_recall = (onset_total_tp_eval[..., -N_KEYS:].sum() / onset_total_p_eval[..., -N_KEYS:].sum()).item()
                     total_p_prec = (onset_total_tp_eval[..., -N_KEYS:].sum() / onset_total_pp_eval[..., -N_KEYS:].sum()).item()
-                    total_p_f1 = 2 * total_p_recall * total_p_prec / (total_p_recall + total_p_prec)
+                    if total_p_recall + total_p_prec != 0:
+                        total_p_f1 = 2 * total_p_recall * total_p_prec / (total_p_recall + total_p_prec)
+                    else:
+                        total_p_f1 = 0
                     frame_recall = (frame_total_tp_eval.sum() / frame_total_p_eval.sum()).item()
                     frame_prec = (frame_total_tp_eval.sum() / frame_total_pp_eval.sum()).item()
-                    frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+                    if frame_recall + frame_prec != 0:
+                        frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+                    else:
+                        frame_f1 = 0
 
                     sw.add_scalar("Eval/Onset Precision", total_prec, step)
                     sw.add_scalar("Eval/Onset Recall", total_recall, step)
@@ -299,13 +308,13 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
             step += 1
 
-        save_condition = (total_prec > max_prec)
+        save_condition = (total_f1 > max_f1)
         if save_condition:
-            max_prec = total_prec
+            max_f1 = total_f1
             torch.save(transcriber, os.path.join(logdir, 'transcriber_{}_{}.pt'.format(epoch, step)))
             torch.save(optimizer.state_dict(), os.path.join(logdir, 'last-optimizer-state.pt'))
             torch.save({'instrument_mapping': dataset.instruments},
                        os.path.join(logdir, 'instrument_mapping.pt'.format(epoch)))
-            print("SAVE:", max_prec)
+            print("SAVE:", max_f1)
 
 

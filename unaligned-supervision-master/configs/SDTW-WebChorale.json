@@ -1,16 +1,16 @@
 {
-    "logdir": "runs/transcriber-SDTW-xe-oneprogram",
+    "logdir": "runs/transcriber-ori-xe-oneprogram-final",
     "transcriber_ckpt": "./ckpts/model_48.pt",
     "multi_ckpt": false,
 
     "checkpoint_interval": 6,
-    "batch_size": 4,
+    "batch_size": 2,
 
     "iterations": 2000,
     "learning_rate": 0.0001,
     "learning_rate_decay_steps": 10000,
     "clip_gradient_norm": false,
-    "epochs": 50,
+    "epochs": 30,
     "sequence_length": 655360,
 
     "train_data_path": "/storageSSD/huiran/WebChoralDataset/OneSong_audio",
@@ -18,5 +18,5 @@
     "tsv_path": "/storageSSD/huiran/WebChoralDataset/OneSong_tsv",
     "train_groups": ["program_change_midi"],
 
-    "train_mode": "SDTW"
+    "train_mode": "ori"
 }
