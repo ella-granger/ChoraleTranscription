@@ -22,7 +22,7 @@ class EMDATASET(Dataset):
                  real_path = '/storageSSD/huiran/BachChorale/BachChorale_tsv/midi_align',
                  groups=None, sequence_length=None, seed=42, device=DEFAULT_DEVICE,
                  instrument_map=None, update_instruments=False, transcriber=None,
-                 conversion_map=None, valid_list=None):
+                 conversion_map=None, valid_list=None, real_label=False):
         self.valid_ids = None
         try:
             with open(valid_list) as fin:
@@ -37,6 +37,7 @@ class EMDATASET(Dataset):
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
+        self.real_label = real_label
         
         self.groups = groups
         self.conversion_map = conversion_map
@@ -74,6 +75,8 @@ class EMDATASET(Dataset):
         good_ids = list(range(1788, 1794))
         # self.valid_ids = [str(x) for x in good_ids]
         print(self.valid_ids)
+        print(len(self.valid_ids))
+        _ = input()
         # good_ids += list(range(2075, 2084))
         # good_ids += list(range(1817, 1820))
         # good_ids += list(range(2202, 2205))
@@ -88,6 +91,8 @@ class EMDATASET(Dataset):
                 fls = sorted(fls)
                 print(fls)
                 print(tsvs)
+                print(len(fls))
+                print(len(tsvs))
 
                 # if 'program_change_midi' in group:
                 fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
@@ -99,10 +104,11 @@ class EMDATASET(Dataset):
                     valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
 
                 print(len(fls), len(valid_tsvs))
+                _ = input()
 
                 assert(len(fls) == len(valid_tsvs))
 
-                for f, t in zip(fls[:500], valid_tsvs[:500]):
+                for f, t in zip(fls[:600], valid_tsvs[:600]):
                     # #### MusicNet
                     if 'MusicNet' in group:
                         if all([str(elem) not in f for elem in good_ids]):
@@ -189,7 +195,7 @@ class EMDATASET(Dataset):
             if real_diff > 0:
                 result['real_label'] = F.pad(result['real_label'], (0, 0, 0, real_diff))
             result['real_label'] = result['real_label'].to(self.device)
-        print(result['real_label'].size())
+        # print(result['real_label'].size())
 
         if 'velocity' in data:
             result['velocity'] = data['velocity'][step_begin:step_end, ...].to(self.device)
@@ -274,12 +280,12 @@ class EMDATASET(Dataset):
         print('loading pts...')
         for flac, tsv in tqdm(files):
             print('flac, tsv', flac, tsv)
-            # if os.path.isfile(self.labels_path + '/' +
-            #                   flac.split('/')[-1].replace('.flac', '.pt')):
-            #     self.pts[flac] = torch.load(self.labels_path + '/' +
-            #                   flac.split('/')[-1].replace('.flac', '.pt'))
-            if False:
-                continue
+            if os.path.isfile(self.labels_path + '/' +
+                              flac.split('/')[-1].replace('.flac', '.pt')):
+                self.pts[flac] = torch.load(self.labels_path + '/' +
+                              flac.split('/')[-1].replace('.flac', '.pt'))
+            # if False:
+            #     continue
             else:
                 if flac.count('#') != 2:
                     print('two #', flac)
@@ -301,16 +307,20 @@ class EMDATASET(Dataset):
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
-                real_midi = self.real_path + "/" + tsv.split('/')[-1]
-                # print(real_midi)
-                real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
-                real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
+                data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
+                            audio=audio, unaligned_label=unaligned_label, label=unaligned_label)
 
+                if self.real_label:
+                    real_midi = self.real_path + "/" + tsv.split('/')[-1]
+                    # print(real_midi)
+                    real_midi = np.loadtxt(real_midi, delimiter='\t', skiprows=1)
+                    real_label = midi_to_frames(real_midi, self.instruments, conversion_map=self.conversion_map)
+                    data["real_label"] = real_label
+                
                 # print(unaligned_label.shape)
                 # print(real_label.shape)
-                data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label, real_label=real_label) # , label=unaligned_label, real_label=real_label)
+                
                 torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
                                .replace('.flac', '.pt').replace('.mp3', '.pt'))
                 self.pts[flac] = data

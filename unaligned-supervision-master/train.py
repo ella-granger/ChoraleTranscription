@@ -61,21 +61,24 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                            device=device,
                            instrument_map=instrument_map,
                            conversion_map=conversion_map,
-                           valid_list="/storageSSD/huiran/BachChorale/train.json"
+                           valid_list="/storageSSD/huiran/WebChoralDataset/valid_list.json"
                            )
-    valid_data = EMDATASET(audio_path=train_data_path,
-                           labels_path=labels_path,
-                           tsv_path=tsv_path,
-                           groups=train_groups,
+    valid_data = EMDATASET(audio_path="/storageSSD/huiran/BachChorale/BachChorale_audio", # train_data_path,
+                           labels_path="/storageSSD/huiran/BachChorale/BachChorale_labels", # labels_path,
+                           tsv_path="/storageSSD/huiran/BachChorale/BachChorale_tsv", # tsv_path,
+                           groups=["BachChorale"], # train_groups,
                            sequence_length=sequence_length,
                            seed=42,
                            device=device,
                            instrument_map=instrument_map,
                            conversion_map=conversion_map,
-                           valid_list="/storageSSD/huiran/BachChorale/valid.json"
+                           valid_list="/storageSSD/huiran/BachChorale/valid.json",
+                           real_label=True
                            )
-    print('len dataset', len(dataset), len(dataset.data))
-    print('instruments', dataset.instruments, len(dataset.instruments))
+    print('len train dataset', len(train_data))
+    print('instruments', train_data.instruments)
+    print('len valid dataset', len(valid_data))
+    # _ = input()
     # train_data, test_data = random_split(dataset, [len(dataset) - 5, 5])
 
     if not multi_ckpt:
@@ -86,10 +89,10 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                 (MAX_MIDI - MIN_MIDI + 1),
                 model_complexity,
                 onset_complexity=1.,
-                n_instruments=len(dataset.instruments) + 1,
+                n_instruments=len(train_data.instruments) + 1,
                 train_mode=train_mode).to(device)
         # We load weights from the saved pitch-only checkkpoint and duplicate the final layer as an initialization:
-        load_weights(transcriber, saved_transcriber, n_instruments=len(dataset.instruments) + 1)
+        load_weights(transcriber, saved_transcriber, n_instruments=len(train_data.instruments) + 1)
     else:
         # The checkpoint is already instrument-sensitive
         transcriber = torch.load(transcriber_ckpt).to(device)
@@ -136,7 +139,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
         NEG = -0.1 # Pseudo-label negative threshold (value < 0 means no pseudo label).
         # """
         with torch.no_grad():
-            if epoch % 1 == 0:
+            if epoch % 1 == 0 and train_mode == "ori":
                 train_data.update_pts(parallel_transcriber,
                                       POS=POS,
                                       NEG=NEG,
@@ -196,14 +199,24 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
             if step % 20 == 0:
                 onset_recall = (onset_total_tp.sum() / onset_total_p.sum()).item()
                 onset_precision = (onset_total_tp.sum() / onset_total_pp.sum()).item()
-                onset_f1 = 2 * onset_recall * onset_precision / (onset_precision + onset_recall)
+                if onset_recall > 0 and onset_precision > 0:
+                    onset_f1 = 2 * onset_recall * onset_precision / (onset_precision + onset_recall)
+                else:
+                    onset_f1 = 0
 
                 pitch_onset_recall = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_p[..., -N_KEYS:].sum()).item()
                 pitch_onset_precision = (onset_total_tp[..., -N_KEYS:].sum() / onset_total_pp[..., -N_KEYS:].sum()).item()
-                pitch_f1 = 2 * pitch_onset_recall * pitch_onset_precision / (pitch_onset_recall + pitch_onset_precision)
+                if pitch_onset_recall > 0 and pitch_onset_precision > 0:
+                    pitch_f1 = 2 * pitch_onset_recall * pitch_onset_precision / (pitch_onset_recall + pitch_onset_precision)
+                else:
+                    pitch_f1 = 0
+
                 frame_recall = (frame_total_tp.sum() / frame_total_p.sum()).item()
                 frame_prec = (frame_total_tp.sum() / frame_total_pp.sum()).item()
-                frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+                if frame_recall > 0 and frame_prec > 0:
+                    frame_f1 = 2 * frame_recall * frame_prec / (frame_recall + frame_prec)
+                else:
+                    frame_f1 = 0
 
                 itr.set_description(f"loss: {loss.item()}, Onset Precision: {onset_precision}, Onset Recall: {onset_recall}, Pitch Onset Precision: {pitch_onset_precision}, Pitch Onset Recall: {pitch_onset_recall}")
                 
@@ -319,11 +332,12 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
             step += 1
 
         save_condition = (total_f1 > max_f1)
+        save_condition = True
         if save_condition:
             max_f1 = total_f1
             torch.save(transcriber, os.path.join(logdir, 'transcriber_{}_{}.pt'.format(epoch, step)))
             torch.save(optimizer.state_dict(), os.path.join(logdir, 'last-optimizer-state.pt'))
-            torch.save({'instrument_mapping': dataset.instruments},
+            torch.save({'instrument_mapping': train_data.instruments},
                        os.path.join(logdir, 'instrument_mapping.pt'.format(epoch)))
             print("SAVE:", max_f1)
 

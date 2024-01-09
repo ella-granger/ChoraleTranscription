@@ -39,7 +39,8 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
                         seed=42,
                         device=device,
                         instrument_map=instrument_map,
-                        conversion_map=conversion_map)
+                        conversion_map=conversion_map,
+                        valid_list="/storageSSD/huiran/BachChorale/test.json")
 
     logdir = Path(logdir)
     ckpt = list(logdir.glob("transcriber_*.pt"))
@@ -49,7 +50,7 @@ def my_main(logdir, iterations, checkpoint_interval, batch_size,
     print(e)
     e = e[-1]
     print(e)
-    e = 6
+    # e = 6
     print(e)
     ckpt = logdir / ("transcriber_%d_%d000.pt" % (e, e))
     print(ckpt)
