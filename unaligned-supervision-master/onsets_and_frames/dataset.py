@@ -29,7 +29,7 @@ class EMDATASET(Dataset):
                 self.valid_ids = json.load(fin)
         except Exception as e:
             print(e)
-        self.audio_path = audio_path
+        self.audio_path = mel_path
         self.labels_path = labels_path
         self.tsv_path = tsv_path
         self.real_path = real_path
@@ -76,7 +76,7 @@ class EMDATASET(Dataset):
         # self.valid_ids = [str(x) for x in good_ids]
         print(self.valid_ids)
         print(len(self.valid_ids))
-        _ = input()
+        # _ = input()
         # good_ids += list(range(2075, 2084))
         # good_ids += list(range(1817, 1820))
         # good_ids += list(range(2202, 2205))
@@ -152,34 +152,37 @@ class EMDATASET(Dataset):
         self.instruments = instruments
 
     def __getitem__(self, index):
-        # print("HELLO", index)
+        print("HELLO", index)
         data = self.load(*self.data[index])
         
         result = dict(path=data['path'])
         midi_length = len(data['label'])
         n_steps = self.sequence_length // HOP_LENGTH
-        real_length = len(data['mel'])
-        # print(midi_length, n_steps)
-        if midi_length > n_steps:
-            step_begin = self.random.randint(midi_length - n_steps)
+        real_length = data['mel'].shape[-1]
+        print(midi_length, n_steps, real_length, data['mel'].shape)
+        if real_length > n_steps:
+            step_begin = self.random.randint(real_length - n_steps)
         else:
             step_begin = 0
         # print("HELLO", index, step_begin)
         # step_begin = 0
         step_end = step_begin + n_steps
-        result['mel'] = data['mel'][step_begin:step_end]
+        result['mel'] = data['mel'][:, step_begin:step_end]
         
-        diff = len(data['mel']) - n_steps
+        diff = n_steps - data['mel'].shape[-1]
         # print(self.sequence_length)
-        # print(diff)
+        print(diff)
         # print(len(result['audio']) / self.sequence_length * n_steps)
         if diff > 0:
-            result['mel'] = torch.cat((result['mel'], torch.ones(diff, dtype=result['mel'].dtype) * torch.log(1e-5)))
-        result['audio'] = result['audio'].to(self.device)
+            result['mel'] = torch.cat((result['mel'], torch.log(torch.ones(data['mel'].shape[-2], diff, dtype=result['mel'].dtype) + 1e-5)), dim=-1)
+        result['mel'] = result['mel'].to(self.device)
+        print(result['mel'].shape)
 
-        diff = n_steps - midi_length
+        # diff = n_steps - midi_length
         result['label'] = data['label'][step_begin:step_end, ...]
         # print(result['label'].size())
+        diff = n_steps - len(result['label'])
+        print(diff)
         if diff > 0:
             result['label'] = F.pad(result['label'], (0, 0, 0, diff))
         # print(result['label'].size())
@@ -228,16 +231,17 @@ class EMDATASET(Dataset):
 
         result['real_length'] = real_length
 
-        # for k, v in result.items():
-        #     if k != "real_length":
-        #         print(k, len(v))
+        for k, v in result.items():
+            if k != "real_length":
+                print(k, len(v))
+
         return result
 
     def load(self, audio_path, tsv_path):
         data = self.pts[audio_path]
         # print(audio_path, tsv_path)
-        if len(data['audio'].shape) > 1:
-            data['audio'] = (data['audio'].float().mean(dim=-1)).short()
+        # if len(data['audio'].shape) > 1:
+        #     data['audio'] = (data['audio'].float().mean(dim=-1)).short()
         if 'label' in data:
             return data
         else:
@@ -260,7 +264,8 @@ class EMDATASET(Dataset):
             res = {}
             res['label'] = shift_label(self.pts[orig]['label'], int(shift))
             res['path'] = audio_path
-            res['audio'] = data['audio']
+            # res['audio'] = data['audio']
+            res['mel'] = data['mel']
             if 'velocity' in self.pts[orig]:
                 res['velocity'] = shift_label(self.pts[orig]['velocity'], int(shift))
             if 'onset_mask' in self.pts[orig]:
@@ -277,15 +282,16 @@ class EMDATASET(Dataset):
             if os.path.isfile(self.labels_path + '/' +
                               npy.split('/')[-1].replace('.npy', '.pt')):
                 self.pts[npy] = torch.load(self.labels_path + '/' +
-                              flac.split('/')[-1].replace('.npy', '.pt'))
+                              npy.split('/')[-1].replace('.npy', '.pt'))
             # if False:
             #     continue
             else:
                 if npy.count('#') != 2:
                     print('two #', flac)
-                mel = np.load(npy)
+                mel = np.load(npy, allow_pickle=True)
+                mel = mel[0]
                 mel = torch.FloatTensor(mel)
-                if '#0' not in flac:
+                if '#0' not in npy:
                     assert '#' in npy
                     data = {'mel': mel}
                     self.pts[npy] = data
@@ -295,7 +301,7 @@ class EMDATASET(Dataset):
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
-                data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
+                data = dict(path=self.labels_path + '/' + npy.split('/')[-1],
                             mel=mel, unaligned_label=unaligned_label, label=unaligned_label)
 
                 if self.real_label:
@@ -310,7 +316,7 @@ class EMDATASET(Dataset):
                 
                 torch.save(data, self.labels_path + '/' + npy.split('/')[-1]
                                .replace('.npy', '.pt'))
-                self.pts[flac] = data
+                self.pts[npy] = data
 
     '''
     Update labels. 
