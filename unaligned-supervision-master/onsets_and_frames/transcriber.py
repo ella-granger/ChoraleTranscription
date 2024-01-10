@@ -82,6 +82,8 @@ class OnsetsAndFrames(nn.Module):
         print(output_features * n_instruments)
 
     def forward(self, mel):
+        mel = mel.transpose(-1, -2)
+        
         onset_pred = self.onset_stack(mel)
         offset_pred = self.offset_stack(mel)
         activation_pred = self.frame_stack(mel)
@@ -101,13 +103,14 @@ class OnsetsAndFrames(nn.Module):
         return onset_pred, offset_pred, activation_pred, frame_pred, velocity_pred
 
     def eval_on_batch(self, batch):
-        audio_label = batch['audio']
+        # audio_label = batch['audio']
+        mel = batch['mel']
 
         onset_label = batch['onset']
         offset_label = batch['offset']
         frame_label = batch['frame']
 
-        mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
+        # mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
         onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)
 
         predictions = {
@@ -119,7 +122,8 @@ class OnsetsAndFrames(nn.Module):
         
 
     def run_on_batch(self, batch, parallel_model=None, multi=False, positive_weight=2., inv_positive_weight=2.,loss_function=None):
-        audio_label = batch['audio']
+        # audio_label = batch['audio']
+        mel = batch['mel']
 
         onset_label = batch['onset']
         offset_label = batch['offset']
@@ -130,7 +134,7 @@ class OnsetsAndFrames(nn.Module):
 
         if 'velocity' in batch:
             velocity_label = batch['velocity']
-        mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
+        # mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
 
         if not parallel_model:
             onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)

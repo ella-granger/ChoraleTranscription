@@ -52,7 +52,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
 
     conversion_map = None
     instrument_map = None
-    train_data = EMDATASET(audio_path=train_data_path,
+    train_data = EMDATASET(mel_path=train_data_path,
                            labels_path=labels_path,
                            tsv_path=tsv_path,
                            groups=train_groups,
@@ -63,7 +63,7 @@ def train(logdir, device, iterations, checkpoint_interval, batch_size,
                            conversion_map=conversion_map,
                            valid_list="/storageSSD/huiran/WebChoralDataset/valid_list.json"
                            )
-    valid_data = EMDATASET(audio_path="/storageSSD/huiran/BachChorale/BachChorale_audio", # train_data_path,
+    valid_data = EMDATASET(mel_path="/storageSSD/huiran/BachChorale/BachChorale_mel", # train_data_path,
                            labels_path="/storageSSD/huiran/BachChorale/BachChorale_labels", # labels_path,
                            tsv_path="/storageSSD/huiran/BachChorale/BachChorale_tsv", # tsv_path,
                            groups=["BachChorale"], # train_groups,

@@ -16,7 +16,7 @@ import json
 
 class EMDATASET(Dataset):
     def __init__(self,
-                 audio_path='NoteEM_audio',
+                 mel_path='NoteEM_mel',
                  labels_path='NoteEm_labels',
                  tsv_path='NoteEM_tsv',
                  real_path = '/storageSSD/huiran/BachChorale/BachChorale_tsv/midi_align',
@@ -95,16 +95,16 @@ class EMDATASET(Dataset):
                 print(len(tsvs))
 
                 # if 'program_change_midi' in group:
-                fls = [x for x in fls if x[:-5].split("#")[0] in self.valid_ids]
+                fls = [x for x in fls if x[:-4].split("#")[0] in self.valid_ids]
 
-                valid_names = [x[:-5].split("#")[0] for x in fls]
+                valid_names = [x[:-4].split("#")[0] for x in fls]
                 if "MusicNet" in group:
                     valid_tsvs = [x for x in tsvs if x[:4] in valid_names]
                 else:
                     valid_tsvs = [x for x in tsvs if x[:-4] in valid_names]
 
                 print(len(fls), len(valid_tsvs))
-                _ = input()
+                # _ = input()
 
                 assert(len(fls) == len(valid_tsvs))
 
@@ -157,9 +157,8 @@ class EMDATASET(Dataset):
         
         result = dict(path=data['path'])
         midi_length = len(data['label'])
-        audio_length = len(data["audio"])
         n_steps = self.sequence_length // HOP_LENGTH
-        real_length = audio_length // HOP_LENGTH
+        real_length = len(data['mel'])
         # print(midi_length, n_steps)
         if midi_length > n_steps:
             step_begin = self.random.randint(midi_length - n_steps)
@@ -168,17 +167,14 @@ class EMDATASET(Dataset):
         # print("HELLO", index, step_begin)
         # step_begin = 0
         step_end = step_begin + n_steps
-        begin = step_begin * HOP_LENGTH
-        end = begin + self.sequence_length
-
-        result['audio'] = data['audio'][begin:end]
+        result['mel'] = data['mel'][step_begin:step_end]
         
-        diff = self.sequence_length - len(result['audio'])
+        diff = len(data['mel']) - n_steps
         # print(self.sequence_length)
         # print(diff)
         # print(len(result['audio']) / self.sequence_length * n_steps)
         if diff > 0:
-            result['audio'] = torch.cat((result['audio'], torch.zeros(diff, dtype=result['audio'].dtype)))
+            result['mel'] = torch.cat((result['mel'], torch.ones(diff, dtype=result['mel'].dtype) * torch.log(1e-5)))
         result['audio'] = result['audio'].to(self.device)
 
         diff = n_steps - midi_length
@@ -203,8 +199,6 @@ class EMDATASET(Dataset):
             if diff > 0:
                 result['velocity'] = F.pad(result['velocity'], (0, 0, 0, diff))
 
-        result['audio'] = result['audio'].float()
-        result['audio'] = result['audio'].div_(32768.0)
         result['onset'] = (result['label'] == 3).float()
         result['offset'] = (result['label'] == 1).float()
         result['frame'] = (result['label'] > 1).float()
@@ -278,38 +272,31 @@ class EMDATASET(Dataset):
     def load_pts(self, files):
         self.pts = {}
         print('loading pts...')
-        for flac, tsv in tqdm(files):
-            print('flac, tsv', flac, tsv)
+        for npy, tsv in tqdm(files):
+            print('npy, tsv', npy, tsv)
             if os.path.isfile(self.labels_path + '/' +
-                              flac.split('/')[-1].replace('.flac', '.pt')):
-                self.pts[flac] = torch.load(self.labels_path + '/' +
-                              flac.split('/')[-1].replace('.flac', '.pt'))
+                              npy.split('/')[-1].replace('.npy', '.pt')):
+                self.pts[npy] = torch.load(self.labels_path + '/' +
+                              flac.split('/')[-1].replace('.npy', '.pt'))
             # if False:
             #     continue
             else:
-                if flac.count('#') != 2:
+                if npy.count('#') != 2:
                     print('two #', flac)
-                audio, sr = soundfile.read(flac, dtype='int16')
-                if len(audio.shape) == 2:
-                    audio = audio.astype(float).mean(axis=1)
-                else:
-                    audio = audio.astype(float)
-                audio = audio.astype(np.int16)
-                print('audio len', len(audio))
-                assert sr == SAMPLE_RATE
-                audio = torch.ShortTensor(audio)
+                mel = np.load(npy)
+                mel = torch.FloatTensor(mel)
                 if '#0' not in flac:
-                    assert '#' in flac
-                    data = {'audio': audio}
-                    self.pts[flac] = data
+                    assert '#' in npy
+                    data = {'mel': mel}
+                    self.pts[npy] = data
                     torch.save(data,
-                               self.labels_path + '/' + flac.split('/')[-1]
-                               .replace('.flac', '.pt').replace('.mp3', '.pt'))
+                               self.labels_path + '/' + npy.split('/')[-1]
+                               .replace('.npy', '.pt'))
                     continue
                 midi = np.loadtxt(tsv, delimiter='\t', skiprows=1)
                 unaligned_label = midi_to_frames(midi, self.instruments, conversion_map=self.conversion_map)
                 data = dict(path=self.labels_path + '/' + flac.split('/')[-1],
-                            audio=audio, unaligned_label=unaligned_label, label=unaligned_label)
+                            mel=mel, unaligned_label=unaligned_label, label=unaligned_label)
 
                 if self.real_label:
                     real_midi = self.real_path + "/" + tsv.split('/')[-1]
@@ -321,8 +308,8 @@ class EMDATASET(Dataset):
                 # print(unaligned_label.shape)
                 # print(real_label.shape)
                 
-                torch.save(data, self.labels_path + '/' + flac.split('/')[-1]
-                               .replace('.flac', '.pt').replace('.mp3', '.pt'))
+                torch.save(data, self.labels_path + '/' + npy.split('/')[-1]
+                               .replace('.npy', '.pt'))
                 self.pts[flac] = data
 
     '''
@@ -341,24 +328,24 @@ class EMDATASET(Dataset):
         if to_save is not None:
             os.makedirs(to_save, exist_ok=True)
         print('there are', len(self.pts), 'data pts')
-        for flac, data in tqdm(self.pts.items()):
+        for mel, data in tqdm(self.pts.items()):
             if 'unaligned_label' not in data:
                 continue
-            print(flac)
-            audio_inp = data['audio'].float() / 32768.
-            MAX_TIME = 5 * 60 * SAMPLE_RATE
-            audio_inp_len = len(audio_inp)
-            if audio_inp_len > MAX_TIME:
-                n_segments = 3 if audio_inp_len > 2 * MAX_TIME else 2
+            print(mel)
+            mel_full = data['mel']
+            MAX_TIME = 5 * 60 * SAMPLE_RATE / HOP_LENGTH
+            mel_len = len(mel_full)
+            if mel_len > MAX_TIME:
+                n_segments = mel_len // MAX_TIME
                 print('long audio, splitting to {} segments'.format(n_segments))
-                seg_len = audio_inp_len // n_segments
+                seg_len = mel_len // n_segments
                 onsets_preds = []
                 offset_preds = []
                 frame_preds = []
                 vel_preds = []
                 for i_s in range(n_segments):
-                    curr = audio_inp[i_s * seg_len: (i_s + 1) * seg_len].unsqueeze(0).to(self.device)
-                    curr_mel = melspectrogram(curr.reshape(-1, curr.shape[-1])[:, :-1]).transpose(-1, -2)
+                    curr_mel = mel_full[i_s * seg_len: (i_s + 1) * seg_len].to(self.device)
+                    # curr_mel = melspectrogram(curr.reshape(-1, curr.shape[-1])[:, :-1]).transpose(-1, -2)
                     curr_onset_pred, curr_offset_pred, _, curr_frame_pred, curr_velocity_pred = transcriber(curr_mel)
                     onsets_preds.append(curr_onset_pred)
                     offset_preds.append(curr_offset_pred)
@@ -369,8 +356,9 @@ class EMDATASET(Dataset):
                 frame_pred = torch.cat(frame_preds, dim=1)
                 velocity_pred = torch.cat(vel_preds, dim=1)
             else:
-                audio_inp = audio_inp.unsqueeze(0).to(self.device)
-                mel = melspectrogram(audio_inp.reshape(-1, audio_inp.shape[-1])[:, :-1]).transpose(-1, -2)
+                # audio_inp = audio_inp.unsqueeze(0).to(self.device)
+                # mel = melspectrogram(audio_inp.reshape(-1, audio_inp.shape[-1])[:, :-1]).transpose(-1, -2)
+                mel = mel_full.to(self.device)
                 # print(next(transcriber.parameters()).is_cuda)
                 # print(type(mel))
                 onset_pred, offset_pred, _, frame_pred, velocity_pred = transcriber(mel)
